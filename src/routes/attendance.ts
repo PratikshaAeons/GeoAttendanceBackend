@@ -6,6 +6,17 @@ import { isWithinGeofence, calculateDistance } from '../utils/location';
 
 const router = express.Router();
 
+// Helper function to get start and end of day
+const getTodayRange = () => {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  
+  return { start, end };
+};
+
 // Check-in endpoint
 router.post('/check-in', authenticate, async (req, res) => {
   try {
@@ -61,15 +72,11 @@ router.post('/check-in', authenticate, async (req, res) => {
     }
 
     // Check if already checked in today
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const { start, end } = getTodayRange();
 
     const existingAttendance = await Attendance.findOne({
       user: userId,
-      date: {
-        $gte: today,
-        $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000),
-      },
+      date: { $gte: start, $lte: end },
     });
 
     if (existingAttendance) {
@@ -79,12 +86,12 @@ router.post('/check-in', authenticate, async (req, res) => {
       });
     }
 
-    // Create attendance record
+    // Create attendance record - use the start of day as date
     const attendance = await Attendance.create({
       user: userId,
-      date: today,
+      date: start, // Use start of day as the date
       checkIn: {
-        time: new Date(),
+        time: new Date(), // Current time for check-in
         location: { latitude, longitude },
         isWithinOffice: true,
         distance: Math.round(distance),
@@ -119,6 +126,8 @@ router.post('/check-out', authenticate, async (req, res) => {
     const { latitude, longitude } = req.body;
     const userId = req.user?.userId;
 
+    console.log('Check-out request:', { userId, latitude, longitude });
+
     // Validation
     if (!latitude || !longitude) {
       return res.status(400).json({
@@ -128,16 +137,14 @@ router.post('/check-out', authenticate, async (req, res) => {
     }
 
     // Get today's attendance record
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const { start, end } = getTodayRange();
 
     const attendance = await Attendance.findOne({
       user: userId,
-      date: {
-        $gte: today,
-        $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000),
-      },
+      date: { $gte: start, $lte: end },
     });
+
+    console.log('Found attendance:', attendance);
 
     if (!attendance) {
       return res.status(400).json({
@@ -146,7 +153,8 @@ router.post('/check-out', authenticate, async (req, res) => {
       });
     }
 
-    if (attendance.checkOut) {
+    if (attendance.checkOut && attendance.checkOut.time) {
+      console.log('Already checked out:', attendance.checkOut.time);
       return res.status(400).json({
         success: false,
         message: 'You have already checked out today',
@@ -191,7 +199,7 @@ router.post('/check-out', authenticate, async (req, res) => {
       distance: Math.round(distance),
     };
 
-    // Calculate total hours worked
+    // Calculate total hours worked (in minutes)
     const timeDiff = checkOutTime.getTime() - attendance.checkIn.time.getTime();
     const totalMinutes = Math.floor(timeDiff / (1000 * 60));
     attendance.totalHours = totalMinutes;
@@ -206,7 +214,8 @@ router.post('/check-out', authenticate, async (req, res) => {
           id: attendance._id,
           checkInTime: attendance.checkIn.time,
           checkOutTime: attendance.checkOut.time,
-          totalHours: Math.floor(totalMinutes / 60) + 'h ' + (totalMinutes % 60) + 'm',
+          totalHours: `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`,
+          totalMinutes: totalMinutes,
         },
       },
     });
@@ -224,29 +233,34 @@ router.get('/today', authenticate, async (req, res) => {
   try {
     const userId = req.user?.userId;
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const { start, end } = getTodayRange();
 
     const attendance = await Attendance.findOne({
       user: userId,
-      date: {
-        $gte: today,
-        $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000),
-      },
+      date: { $gte: start, $lte: end },
     });
+
+    // Format response
+    let formattedAttendance = null;
+    if (attendance) {
+      formattedAttendance = {
+        id: attendance._id,
+        checkInTime: attendance.checkIn.time,
+        checkOutTime: attendance.checkOut?.time || null,
+        status: attendance.status,
+        totalHours: attendance.totalHours 
+          ? `${Math.floor(attendance.totalHours / 60)}h ${attendance.totalHours % 60}m`
+          : null,
+          canCheckOut: attendance.checkIn && !(attendance.checkOut && attendance.checkOut.time), // FIXED: Should be true when checked in but not checked out
+      };
+    }
 
     res.json({
       success: true,
+      message: formattedAttendance ? 'Attendance record found' : 'No attendance record for today',
       data: {
-        attendance: attendance ? {
-          id: attendance._id,
-          checkInTime: attendance.checkIn.time,
-          checkOutTime: attendance.checkOut?.time || null,
-          status: attendance.status,
-          totalHours: attendance.totalHours 
-            ? Math.floor(attendance.totalHours / 60) + 'h ' + (attendance.totalHours % 60) + 'm'
-            : null,
-        } : null,
+        attendance: formattedAttendance,
+        currentTime: new Date().toISOString(),
       },
     });
   } catch (error) {
@@ -279,16 +293,17 @@ router.get('/history', authenticate, async (req, res) => {
       checkOut: attendance.checkOut?.time || null,
       status: attendance.status,
       totalHours: attendance.totalHours 
-        ? Math.floor(attendance.totalHours / 60) + 'h ' + (attendance.totalHours % 60) + 'm'
+        ? `${Math.floor(attendance.totalHours / 60)}h ${attendance.totalHours % 60}m`
         : null,
+      totalMinutes: attendance.totalHours || 0,
       checkInLocation: {
         isWithinOffice: attendance.checkIn.isWithinOffice,
         distance: attendance.checkIn.distance,
       },
-      checkOutLocation: attendance.checkOut ? {
-        isWithinOffice: attendance.checkOut.isWithinOffice,
-        distance: attendance.checkOut.distance,
-      } : null,
+checkOutLocation: attendance.checkOut && attendance.checkOut.time ? {
+  isWithinOffice: attendance.checkOut.isWithinOffice,
+  distance: attendance.checkOut.distance,
+} : null,
     }));
 
     res.json({
@@ -309,4 +324,39 @@ router.get('/history', authenticate, async (req, res) => {
   }
 });
 
+// Temporary debug endpoint (remove after testing)
+router.get('/debug-today', authenticate, async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    const { start, end } = getTodayRange();
+
+    const attendances = await Attendance.find({
+      user: userId,
+      date: { $gte: start, $lte: end },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        dateRange: { start, end },
+        records: attendances.map(att => ({
+          id: att._id,
+          date: att.date,
+          checkIn: att.checkIn.time,
+          checkOut: att.checkOut?.time || null,
+          // FIXED: Properly check if checkOut exists and has time
+          hasCheckOut: !!(att.checkOut && att.checkOut.time),
+          checkOutExists: att.checkOut,
+          checkOutTimeExists: att.checkOut?.time,
+        })),
+      },
+    });
+  } catch (error) {
+    console.error('Debug error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Debug error',
+    });
+  }
+});
 export default router;

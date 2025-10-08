@@ -10,9 +10,9 @@ export interface IAttendance extends Document {
       longitude: number;
     };
     isWithinOffice: boolean;
-    distance: number; // in meters
+    distance: number;
   };
-  checkOut?: {
+  checkOut?: {  // Make this optional
     time: Date;
     location: {
       latitude: number;
@@ -21,7 +21,7 @@ export interface IAttendance extends Document {
     isWithinOffice: boolean;
     distance: number;
   };
-  totalHours?: number; // in minutes
+  totalHours?: number;
   status: 'present' | 'absent' | 'half-day';
   createdAt: Date;
   updatedAt: Date;
@@ -62,7 +62,7 @@ const AttendanceSchema: Schema = new Schema(
         required: [true, 'Check-in distance is required'],
       },
     },
-    checkOut: {
+    checkOut: {  // Remove required fields, make it optional
       time: Date,
       location: {
         latitude: Number,
@@ -71,7 +71,7 @@ const AttendanceSchema: Schema = new Schema(
       isWithinOffice: Boolean,
       distance: Number,
     },
-    totalHours: Number, // in minutes
+    totalHours: Number,
     status: {
       type: String,
       enum: ['present', 'absent', 'half-day'],

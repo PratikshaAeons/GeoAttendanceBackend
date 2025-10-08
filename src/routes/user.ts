@@ -24,11 +24,11 @@ router.get('/stats', authenticate, async (req, res) => {
       date: { $gte: startOfMonth, $lte: endOfMonth },
     });
 
-    const presentDays = monthlyAttendances.filter(a => a.status === 'present').length;
+    const presentDays = monthlyAttendances.filter(a => a.status === 'present' && a.checkOut).length;
     const halfDays = monthlyAttendances.filter(a => a.status === 'half-day').length;
-    const absentDays = monthlyAttendances.filter(a => a.status === 'absent').length;
+    const absentDays = monthlyAttendances.length - presentDays - halfDays;
 
-    // Calculate total working hours this month
+    // Calculate total working hours this month (only completed days with check-out)
     const totalMinutes = monthlyAttendances.reduce((total, attendance) => {
       return total + (attendance.totalHours || 0);
     }, 0);
@@ -44,6 +44,7 @@ router.get('/stats', authenticate, async (req, res) => {
           absent: absentDays,
           halfDays: halfDays,
           totalWorkingHours: `${totalHours}h ${remainingMinutes}m`,
+          totalWorkingMinutes: totalMinutes,
         },
       },
     });

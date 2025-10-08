@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "seed": "ts-node src/scripts/seedData.ts",
+    "clear-attendance": "ts-node src/scripts/clearAttendance.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
